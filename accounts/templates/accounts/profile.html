@@ -1,0 +1,9 @@
+<!-- accounts/templates/accounts/profile.html -->
+{% extends 'accounts/base.html' %}
+
+{% block content %}
+<h2>Profile Page</h2>
+<p><strong>Username:</strong> {{ user.username }}</p>
+<p><strong>Email:</strong> {{ user.email }}</p>
+<a href="{% url 'password_change' %}" class="btn btn-secondary">Change Password</a>
+{% endblock %}
