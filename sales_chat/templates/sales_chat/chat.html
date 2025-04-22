@@ -1,0 +1,28 @@
+{% extends "accounts/base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="row">
+  <!-- main chat window -->
+  <div class="col-lg-8">
+      <h2>Sales Conversation</h2>
+      <div id="chat-box" class="border rounded p-3 mb-3" style="height:60vh; overflow-y:auto;"></div>
+
+      <form id="chat-form" class="d-flex gap-2">
+          {% csrf_token %}
+          <textarea id="query" name="query" class="form-control" rows="2" placeholder="Pitch your product..."></textarea>
+          <button type="submit" class="btn btn-primary">Send</button>
+      </form>
+  </div>
+
+  <!-- adviser sidebar -->
+  <div class="col-lg-4">
+      <h4 class="text-info">AI Sales Coach</h4>
+      <div id="coach-box" class="border rounded p-3" style="height:60vh; overflow-y:auto; font-size:0.9rem;">
+        <p style="color:#cccccc;">The coach will jump in when needed.</p>
+      </div>
+  </div>
+</div>
+
+<script src="{% static 'sales_chat/chat.js' %}"></script>
+{% endblock %}
