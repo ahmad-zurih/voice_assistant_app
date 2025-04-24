@@ -1,4 +1,6 @@
 from django.db import models
+from django.conf import settings
+from django.utils import timezone
 
 class Prompt(models.Model):
 
@@ -21,3 +23,30 @@ class Prompt(models.Model):
     def __str__(self):
         # shows human-friendly label in lists
         return self.get_key_display()
+
+
+
+def _chat_log_upload_to(instance, filename):
+    """MEDIA_ROOT/chat_logs/<username>/<filename>"""
+    return f"chat_logs/{instance.user.username}/{filename}"
+
+
+class Conversation(models.Model):
+    """
+    One CSV file per conversation (= one front-end session).
+    The file grows row-by-row while the chat is happening.
+    """
+    user       = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="conversations",
+    )
+    started_at = models.DateTimeField(default=timezone.now, db_index=True)
+    log_file   = models.FileField(upload_to=_chat_log_upload_to)
+
+    class Meta:
+        ordering = ("-started_at",)
+
+    def __str__(self) -> str:
+        ts = self.started_at.strftime("%Y-%m-%d %H:%M")
+        return f"{self.user.username} – {ts}"

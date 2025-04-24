@@ -147,3 +147,6 @@ LOGOUT_REDIRECT_URL = 'login'
 # Where to send user if they need to log in
 LOGIN_URL = 'login'
 
+
+MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL  = "/media/"    
