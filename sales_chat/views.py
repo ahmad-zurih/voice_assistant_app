@@ -37,7 +37,7 @@ def chat_stream(request):
     if not user_text:
         return JsonResponse({"error": "empty"}, status=400)
 
-    # Retrieve / initialise dialogue history in session
+    # 1️⃣ get or start a history
     history = request.session.get("sales_chat_history", [])
     if not history:
         history.append({"role": "system", "content": CUSTOMER_PROMPT})
@@ -52,19 +52,20 @@ def chat_stream(request):
         stream=True,
     )
 
+    # 2️⃣ streaming generator
     def sse():
-        """
-        Generator that yields customer text chunks; collects them so we can
-        update session afterwards.
-        """
         full = ""
         for chunk in stream:
             delta = chunk.choices[0].delta.content or ""
             full += delta
             yield delta
-        # store assistant turn
+
+        # assistant turn is complete
         history.append({"role": "assistant", "content": full})
         request.session["sales_chat_history"] = history
+
+        # ✨  EXPLICITLY SAVE  ✨
+        request.session.save()         # <‑‑ this line makes the difference
 
     return StreamingHttpResponse(sse(), content_type="text/plain")
 
