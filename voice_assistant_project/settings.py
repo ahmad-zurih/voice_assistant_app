@@ -148,5 +148,5 @@ LOGOUT_REDIRECT_URL = 'login'
 LOGIN_URL = 'login'
 
 
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = env('MEDIA_ROOT')
 MEDIA_URL  = "/media/"    
