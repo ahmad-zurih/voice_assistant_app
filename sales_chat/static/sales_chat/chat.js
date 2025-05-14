@@ -91,9 +91,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- customer typing placeholder ---------------------------
     const typingElem = addBubble(
       "Customer",
-      "<em>is typing…</em>",
-      "text-muted fst-italic"
-    );
+      '<em class="typing-indicator typing-dots">is typing…</em>',
+      ""                      // no Bootstrap muted-grey class
+      );
+
 
     const formData = new FormData();
     formData.append("query", userText);

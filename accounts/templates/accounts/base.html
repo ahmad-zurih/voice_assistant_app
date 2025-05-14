@@ -30,7 +30,12 @@
       .container {
           margin-top: 50px;
       }
-      .typing-dots::after {
+      /* brighter colour for the “is typing…” placeholder  */
+    .typing-indicator {
+    color: #0d6efd;   /* Bootstrap “primary” blue — pick any colour you like */
+    font-style: italic;
+    }
+      .typing-indicator.typing-dots::after {
       content: " …";
       animation: blink 1s steps(3, end) infinite;
       }
