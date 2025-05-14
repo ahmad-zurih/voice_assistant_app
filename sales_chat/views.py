@@ -99,7 +99,7 @@ def chat_stream(request):
     # 2️⃣  call OpenAI & stream the assistant reply
     client = get_openai_client()
     stream = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4.1",
         messages=history,
         temperature=0.7,
         stream=True,
@@ -150,7 +150,7 @@ def coach_advice(request):
     try:
         client = get_openai_client()
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1",
             temperature=0.35,
             max_tokens=180,
             messages=[
