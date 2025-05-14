@@ -1,5 +1,5 @@
 /* sales_chat/static/sales_chat/chat.js
-   — no-stream version with typing indicator + hidden coach tab
+   — typing indicator + hidden coach tab + “clicked” logging
 */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -16,6 +16,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const coachPanel = document.getElementById("coach-panel");
 
   const csrfToken  = document.querySelector('[name="csrfmiddlewaretoken"]').value;
+
+  // -------------------------------------------------------------
+  // state
+  // -------------------------------------------------------------
+  let clickSent = false;   // set to true after “clicked” POST; reset each turn
 
   // -------------------------------------------------------------
   // helpers
@@ -36,6 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
     coachPanel.style.display = "none";
     coachCtr.classList.add("d-none");
     coachBadge.textContent = "";
+    clickSent = true;   // nothing to send until we show new advice
   };
 
   const showCoachAdvice = (advice) => {
@@ -44,13 +50,26 @@ document.addEventListener("DOMContentLoaded", () => {
     coachPanel.innerHTML = advice.replace(/\n/g, "<br>");
     coachCtr.classList.remove("d-none");
     coachBadge.textContent = "1";             // unread marker
+    clickSent = false;                        // ready to send “clicked”
   };
 
-  // click toggles panel & clears unread
+  // click toggles panel, clears unread, and logs “clicked”
   coachTab.addEventListener("click", () => {
     const open = coachPanel.style.display === "block";
     coachPanel.style.display = open ? "none" : "block";
-    if (!open) coachBadge.textContent = "";   // mark as read
+
+    if (!open) {                    // user just opened it
+      coachBadge.textContent = "";  // mark as read
+
+      if (!clickSent) {
+        fetch("/chat/coach/clicked/", {
+          method: "POST",
+          headers: { "X-CSRFToken": csrfToken },
+          credentials: "same-origin",
+        }).catch(console.error);
+        clickSent = true;
+      }
+    }
   });
 
   // -------------------------------------------------------------
