@@ -166,8 +166,12 @@ def coach_advice(request):
         advice_text = "⚠️ Coach temporarily unavailable – please continue."
 
     # ----- normalise -----------------------------------------------------
+    show_to_user = True
     if not advice_text or advice_text.upper().startswith("NO_ADVICE"):
-        advice_text = "✅ Great job! No advice needed."
+        show_to_user = False          # nothing will pop up
+        advice_visible = ""           # empty string → front-end ignores
+    else:
+        advice_visible = advice_text
 
     # --------------------------------------------------------------------
     # append Human / AI-customer / AI-coach to CSV (if we have all parts)
@@ -184,4 +188,5 @@ def coach_advice(request):
             # Don’t crash the UX; just log the error
             print("CSV append error:", e)
 
-    return JsonResponse({"advice": advice_text})
+    return JsonResponse({"advice": advice_visible})
+

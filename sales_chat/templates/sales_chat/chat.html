@@ -16,12 +16,22 @@
   </div>
 
   <!-- adviser sidebar -->
-  <div class="col-lg-4">
-      <h4 class="text-info">AI Sales Coach</h4>
-      <div id="coach-box" class="border rounded p-3" style="height:60vh; overflow-y:auto; font-size:0.9rem;">
-        <p style="color:#cccccc;">The coach will jump in when needed.</p>
+  <!-- adviser sidebar -->
+<div class="col-lg-4">
+  <!-- hidden container; becomes visible only when advice arrives -->
+  <div id="coach-container" class="d-none">
+      <button id="coach-tab" class="btn btn-warning w-100 mb-2">
+          Coach advice
+          <span id="coach-badge" class="badge bg-danger"></span>
+      </button>
+
+      <div id="coach-panel"
+           class="border rounded p-3"
+           style="display:none; max-height:50vh; overflow-y:auto; font-size:0.9rem;">
       </div>
   </div>
+</div>
+
 </div>
 
 <script src="{% static 'sales_chat/chat.js' %}"></script>
