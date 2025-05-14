@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import time
 from pathlib import Path
 
 from django.contrib.auth.decorators import login_required
@@ -85,10 +86,8 @@ def chat_stream(request):
     if not user_text:
         return JsonResponse({"error": "empty"}, status=400)
 
-    # 0️⃣  guarantee a Conversation + CSV for this browser session
     _ensure_conversation(request)
 
-    # 1️⃣  recover or start the chat history held in the session
     history = request.session.get("sales_chat_history", [])
     if not history:
         customer_prompt = get_prompt("CUSTOMER_PROMPT", DEFAULT_CUSTOMER_PROMPT)
@@ -96,32 +95,29 @@ def chat_stream(request):
 
     history.append({"role": "user", "content": user_text})
 
-    # 2️⃣  call OpenAI & stream the assistant reply
-    client = get_openai_client()
-    stream = client.chat.completions.create(
+    # 1️⃣  normal (non-stream) OpenAI call
+    client   = get_openai_client()
+    response = client.chat.completions.create(
         model="gpt-4.1",
         messages=history,
-        temperature=0.7,
-        stream=True,
+        temperature=0.7,        # keep diversity
+        stream=False,           # <— important
     )
+    full = response.choices[0].message.content
 
-    # 3️⃣  SSE generator — builds the assistant reply incrementally
-    def sse():
-        full = ""
-        for chunk in stream:
-            delta = chunk.choices[0].delta.content or ""
-            full += delta
-            yield delta
+    # 2️⃣  human-like typing delay
+    delay = min(max(len(full.split()) * 0.2, 0.5), 8.0)  # 0.2 s per word, 0.5-8 s
+    time.sleep(delay)
 
-        # assistant turn finished → update session history
-        history.append({"role": "assistant", "content": full})
-        request.session["sales_chat_history"] = history
+    # 3️⃣  update history and pending CSV row
+    history.append({"role": "assistant", "content": full})
+    request.session["sales_chat_history"] = history
+    request.session["pending_row"] = [user_text, full]
+    request.session.save()
 
-        # stash human + assistant texts for coach to finalise the CSV row
-        request.session["pending_row"] = [user_text, full]
-        request.session.save()          # ✨ force-save ✨
+    # 4️⃣  send the whole reply in one go
+    return JsonResponse({"answer": full}, json_dumps_params={"ensure_ascii": False})
 
-    return StreamingHttpResponse(sse(), content_type="text/plain")
 
 
 # -------------------------------------------------------------------

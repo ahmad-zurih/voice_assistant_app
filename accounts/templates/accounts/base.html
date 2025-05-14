@@ -30,6 +30,12 @@
       .container {
           margin-top: 50px;
       }
+      .typing-dots::after {
+      content: " …";
+      animation: blink 1s steps(3, end) infinite;
+      }
+      @keyframes blink { 0%, 100% { opacity: 0 } 50% { opacity: 1 } }
+
     </style>
 </head>
 <body>
