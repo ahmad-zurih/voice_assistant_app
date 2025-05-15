@@ -3,36 +3,45 @@
 
 {% block content %}
 <div class="row">
-  <!-- main chat window -->
+  <!-- main chat column ------------------------------------------>
   <div class="col-lg-8">
       <h2>Sales Conversation</h2>
-      <div id="chat-box" class="border rounded p-3 mb-3" style="height:60vh; overflow-y:auto;"></div>
+
+      <!-- session controls -->
+      <div class="mb-3">
+          <button id="start-btn" class="btn btn-success">Start session</button>
+          <button id="end-btn"   class="btn btn-danger d-none">End session</button>
+          <span id="timer" class="ms-3 fw-bold h5"></span>
+      </div>
+
+      <div id="chat-box" class="border rounded p-3 mb-3"
+           style="height:60vh; overflow-y:auto;"></div>
 
       <form id="chat-form" class="d-flex gap-2">
           {% csrf_token %}
-          <textarea id="query" name="query" class="form-control" rows="2" placeholder="Pitch your product..."></textarea>
-          <button type="submit" class="btn btn-primary">Send</button>
+          <textarea id="query" name="query" class="form-control" rows="2"
+                    placeholder="Pitch your product..." disabled></textarea>
+          <button type="submit" class="btn btn-primary" disabled>Send</button>
       </form>
   </div>
 
-  <!-- adviser sidebar -->
-  <!-- adviser sidebar -->
-<div class="col-lg-4">
-  <!-- hidden container; becomes visible only when advice arrives -->
-  <div id="coach-container" class="d-none">
-      <button id="coach-tab" class="btn btn-warning w-100 mb-2">
-          Coach advice
-          <span id="coach-badge" class="badge bg-danger"></span>
-      </button>
+  <!-- adviser sidebar ------------------------------------------>
+  <div class="col-lg-4">
+      <!-- hidden container; becomes visible when advice arrives -->
+      <div id="coach-container" class="d-none">
+          <button id="coach-tab" class="btn btn-warning w-100 mb-2">
+              Coach advice
+              <span id="coach-badge" class="badge bg-danger"></span>
+          </button>
 
-      <div id="coach-panel"
-           class="border rounded p-3"
-           style="display:none; max-height:50vh; overflow-y:auto; font-size:0.9rem;">
+          <div id="coach-panel"
+               class="border rounded p-3"
+               style="display:none; max-height:50vh; overflow-y:auto; font-size:0.9rem;">
+          </div>
       </div>
   </div>
 </div>
 
-</div>
-
+<link rel="stylesheet" href="{% static 'sales_chat/chat.css' %}">
 <script src="{% static 'sales_chat/chat.js' %}"></script>
 {% endblock %}

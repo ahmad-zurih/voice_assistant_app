@@ -15,64 +15,102 @@ from .models import Conversation
 from .utils import get_openai_client
 from .utils_prompt import get_prompt
 
-
 # -------------------------------------------------------------------
 # constants & helpers
 # -------------------------------------------------------------------
-CSV_HEADER = (
-    "timestamp,sales person,AI customer,AI assistant coach,clicked\n"
-)
+CSV_HEADER = "timestamp,sales person,AI customer,AI assistant coach,clicked\n"
+SESSION_DURATION = 20 * 60           # 20 minutes  → 1 200 seconds
 
 
 def _now():
-    """Return local time HH:MM:SS (sufficient granularity for the log)."""
+    """Return local time HH:MM:SS (good enough for this log)."""
     return timezone.localtime().strftime("%H:%M:%S")
 
 
 def _append_row(log_path: str, *, sales="", customer="", coach="", clicked=""):
     """Append one row to the on-disk CSV file."""
     if not log_path:
-        return                            # should never happen
+        return
     try:
         with open(Path(log_path), "a", newline="", encoding="utf-8") as fp:
             csv.writer(fp).writerow([_now(), sales, customer, coach, clicked])
     except Exception as e:
-        # Don’t crash the UX; just log the error
         print("CSV append error:", e)
 
 
-# -------------------------------------------------------------------
-# fall-back prompts
-# -------------------------------------------------------------------
-DEFAULT_CUSTOMER_PROMPT = """
-You are playing the role of a potential customer.
-- Act like a real person evaluating a product or service the salesperson proposes.
-- Ask questions, raise objections, or show interest naturally.
-- Keep replies around 1-3 short paragraphs so the chat flows quickly.
-"""
-
-DEFAULT_COACH_PROMPT = """
-You are a silent sales coach observing the whole dialogue between a salesperson (the USER)
-and a customer (the ASSISTANT). Give concise, actionable advice ONLY IF it will materially
-improve the next sales move. If the salesperson is doing well, answer exactly:  NO_ADVICE
-"""
+def _buffer_row(request, *, sales="", customer="", coach="", clicked=""):
+    """Store one CSV row in the session until we flush at session end."""
+    rows = request.session.get("csv_buffer", [])
+    rows.append([_now(), sales, customer, coach, clicked])
+    request.session["csv_buffer"] = rows
+    request.session.modified = True
 
 
+# views.py
 # -------------------------------------------------------------------
-# ensure Conversation + CSV
+# write-through CSV helper
+# -------------------------------------------------------------------
+def _log_row(request, *, sales="", customer="", coach="", clicked=""):
+    """
+    • immediately append ONE row to the on-disk CSV  
+    • also keep a copy in the session so we can later update the
+      *clicked* column or flush anything that might still be pending
+    """
+    row = [_now(), sales, customer, coach, clicked]
+
+    # --- write to disk right away ----------------------------------
+    path = request.session.get("chat_log_path")
+    if path:
+        try:
+            with open(Path(path), "a", newline="", encoding="utf-8") as fp:
+                csv.writer(fp).writerow(row)
+        except Exception as err:
+            print("CSV write-through error:", err)
+
+    # --- mirror into the session buffer ----------------------------
+    buf = request.session.get("csv_buffer", [])
+    buf.append(row)
+    request.session["csv_buffer"] = buf
+    request.session.modified = True
+
+
+
+# -------------------------------------------------------------------
+# session status helpers
+# -------------------------------------------------------------------
+def _session_active(request) -> bool:
+    """
+    Returns True if the user has pressed “Start session” AND the
+    20-minute window is still running.
+    """
+    if not request.session.get("session_active"):
+        return False
+
+    started_at = request.session.get("session_start")
+    if not started_at:
+        return False
+
+    if time.time() - started_at > SESSION_DURATION:
+        # auto-expire
+        request.session["session_active"] = False
+        request.session.save()
+        return False
+
+    return True
+
+
+# -------------------------------------------------------------------
+# CSV / conversation initialisation
 # -------------------------------------------------------------------
 def _ensure_conversation(request):
-    """
-    Make sure the current browser session is linked to exactly one
-    Conversation row **and** on-disk CSV file. Return the Conversation.
-    """
+    """Guarantee exactly one Conversation + CSV file per browser session."""
     conv_id = request.session.get("conversation_id")
 
     if conv_id:
         try:
             return Conversation.objects.get(id=conv_id)
         except Conversation.DoesNotExist:
-            pass  # stale → fall through to create fresh one
+            pass  # stale ID → create fresh conversation
 
     now = timezone.localtime()
     filename = f"{request.user.username}_{now:%Y-%m-%d_%H-%M-%S}.csv"
@@ -96,12 +134,70 @@ def chat_room(request):
 
 
 # -------------------------------------------------------------------
-# customer endpoint (non-stream)
+# start / end session endpoints
+# -------------------------------------------------------------------
+@csrf_exempt
+@require_POST
+@login_required
+def start_session(request):
+    """Start a brand-new 20-min exercise and a brand-new CSV file."""
+    # ------------------------------------------------------------
+    # 1. wipe anything that ties us to the previous conversation
+    # ------------------------------------------------------------
+    for key in (
+        "conversation_id",      # ← makes _ensure_conversation create a new Conversation
+        "chat_log_path",        # path to the previous CSV
+        "csv_buffer",           # rows still in memory
+        "sales_chat_history",   # old chat transcript
+    ):
+        request.session.pop(key, None)
+
+    # ------------------------------------------------------------
+    # 2. create new Conversation + CSV
+    # ------------------------------------------------------------
+    _ensure_conversation(request)            # ⇒ new file, new filename
+
+    # ------------------------------------------------------------
+    # 3. mark the session “active” and start the timer
+    # ------------------------------------------------------------
+    request.session["session_active"] = True
+    request.session["session_start"]  = int(time.time())
+    request.session.save()
+
+    return JsonResponse(
+        {"status": "started", "duration": SESSION_DURATION}
+    )
+
+
+@csrf_exempt
+@require_POST
+@login_required
+def end_session(request):
+    """Flush anything still buffered, then close the session."""
+    rows   = request.session.pop("csv_buffer", [])
+    path   = request.session.get("chat_log_path")
+
+    if rows and path:                       # unlikely, but be safe
+        with open(Path(path), "a", newline="", encoding="utf-8") as fp:
+            csv.writer(fp).writerows(rows)
+
+    request.session["session_active"] = False
+    request.session.modified = True
+    request.session.save()
+    return JsonResponse({"status": "ended"})
+
+
+
+# -------------------------------------------------------------------
+# customer endpoint
 # -------------------------------------------------------------------
 @csrf_exempt
 @require_POST
 @login_required
 def chat_stream(request):
+    if not _session_active(request):
+        return JsonResponse({"error": "inactive"}, status=403)
+
     user_text = request.POST.get("query", "").strip()
     if not user_text:
         return JsonResponse({"error": "empty"}, status=400)
@@ -109,10 +205,9 @@ def chat_stream(request):
     _ensure_conversation(request)
     log_path = request.session["chat_log_path"]
 
-    # ---- record salesperson message immediately -----------------
-    _append_row(log_path, sales=user_text)
+    _log_row(request, sales=user_text)
 
-    # ---- build / extend chat history ----------------------------
+    # ---- build chat history
     history = request.session.get("sales_chat_history", [])
     if not history:
         system_prompt = get_prompt("CUSTOMER_PROMPT", DEFAULT_CUSTOMER_PROMPT)
@@ -120,7 +215,7 @@ def chat_stream(request):
 
     history.append({"role": "user", "content": user_text})
 
-    # ---- OpenAI call (non-stream) -------------------------------
+    # ---- OpenAI call
     client = get_openai_client()
     response = client.chat.completions.create(
         model="gpt-4.1",
@@ -130,41 +225,38 @@ def chat_stream(request):
     )
     full = response.choices[0].message.content
 
-    # ---- “human” typing delay -----------------------------------
+    # ---- “human” delay
     delay = min(max(len(full.split()) * 0.2, 0.5), 8.0)
     time.sleep(delay)
 
-    # ---- update history & CSV -----------------------------------
+    # ---- update state & CSV
     history.append({"role": "assistant", "content": full})
     request.session["sales_chat_history"] = history
     request.session.save()
 
-    _append_row(log_path, customer=full)
+    _log_row(request, customer=full)
 
     return JsonResponse({"answer": full}, json_dumps_params={"ensure_ascii": False})
 
 
 # -------------------------------------------------------------------
-# coach endpoint
+# coach advice
 # -------------------------------------------------------------------
 @csrf_exempt
 @require_POST
 @login_required
 def coach_advice(request):
-    """
-    Generate (or skip) coach advice and log it.
-    """
+    if not _session_active(request):
+        return JsonResponse({"error": "inactive"}, status=403)
+
     history: list[dict] = request.session.get("sales_chat_history", [])
 
-    if len(history) < 3:  # system + first user turn
-        return JsonResponse(
-            {"advice": "🕒 Say hello to the customer and I'll jump in!"}
-        )
+    if len(history) < 3:
+        return JsonResponse({"advice": "🕒 Say hello to the customer and I'll jump in!"})
 
     trimmed_history = history[-12:]
     coach_prompt = get_prompt("COACH_PROMPT", DEFAULT_COACH_PROMPT)
 
-    # ---- LLM call ----------------------------------------------
     try:
         client = get_openai_client()
         response = client.chat.completions.create(
@@ -187,51 +279,58 @@ def coach_advice(request):
         print("Coach-LLM error:", err)
         advice_text = "⚠️ Coach temporarily unavailable – please continue."
 
-    # ---- decide if we show & log advice ------------------------
     advice_visible = ""
     if advice_text and not advice_text.upper().startswith("NO_ADVICE"):
         advice_visible = advice_text
-        _append_row(
-            request.session.get("chat_log_path"),
+        _log_row(
+            request,
             coach=advice_text,
-            clicked="false",      # default until the UI reports otherwise
+            clicked="false",
         )
-
-    # (nothing is written if NO_ADVICE)
 
     return JsonResponse({"advice": advice_visible})
 
 
 # -------------------------------------------------------------------
-# coach: mark advice as "clicked"
+# mark advice as clicked
 # -------------------------------------------------------------------
 @csrf_exempt
 @require_POST
 @login_required
 def coach_clicked(request):
     """
-    The front-end calls this exactly once when the user opens
-    the advice tab. We rewrite the last CSV row and set clicked=true.
+    Called exactly once when the user opens the coach-advice tab.
+    We flip the *clicked* column from "false" to "true" — but now
+    we do it in the session-buffer, NOT on disk.
     """
-    log_path = request.session.get("chat_log_path")
-    if not log_path:
-        return JsonResponse({"status": "no-log"}, status=400)
+    if not _session_active(request):
+        return JsonResponse({"error": "inactive"}, status=403)
 
-    try:
-        path = Path(log_path)
-        rows = list(csv.reader(path.open(newline="", encoding="utf-8")))
+    rows = request.session.get("csv_buffer", [])
+    if not rows:
+        return JsonResponse({"status": "no-data"}, status=400)
 
-        if len(rows) <= 1:                      # header only
-            return JsonResponse({"status": "no-data"}, status=400)
+    # last row is always the most recent coach advice
+    rows[-1][4] = "true"            # column index 4 == clicked
+    request.session["csv_buffer"] = rows
+    request.session.modified = True   # make sure Django saves the session
 
-        last = rows[-1]
-        # clicked is column index 4
-        last[4] = "true"
-        rows[-1] = last
+    return JsonResponse({"status": "ok"})
 
-        csv.writer(path.open("w", newline="", encoding="utf-8")).writerows(rows)
-        return JsonResponse({"status": "ok"})
-    except Exception as err:
-        print("CSV rewrite error:", err)
-        return JsonResponse({"status": "error"}, status=500)
 
+
+# -------------------------------------------------------------------
+# default prompts (kept at bottom for readability)
+# -------------------------------------------------------------------
+DEFAULT_CUSTOMER_PROMPT = """
+You are playing the role of a potential customer.
+- Act like a real person evaluating a product or service the salesperson proposes.
+- Ask questions, raise objections, or show interest naturally.
+- Keep replies around 1-3 short paragraphs so the chat flows quickly.
+"""
+
+DEFAULT_COACH_PROMPT = """
+You are a silent sales coach observing the whole dialogue between a salesperson (the USER)
+and a customer (the ASSISTANT). Give concise, actionable advice ONLY IF it will materially
+improve the next sales move. If the salesperson is doing well, answer exactly:  NO_ADVICE
+"""

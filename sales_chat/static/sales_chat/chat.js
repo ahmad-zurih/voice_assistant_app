@@ -1,5 +1,5 @@
 /* sales_chat/static/sales_chat/chat.js
-   — typing indicator + hidden coach tab + “clicked” logging
+   — sessions, 20-min timer, typing indicator, coach tab, clicked logging
 */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -7,9 +7,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // DOM shortcuts
   // -------------------------------------------------------------
   const chatForm   = document.getElementById("chat-form");
+  const textarea   = document.getElementById("query");
+  const sendBtn    = chatForm.querySelector("button");
   const chatBox    = document.getElementById("chat-box");
 
-  // coach UI elements
+  const startBtn   = document.getElementById("start-btn");
+  const endBtn     = document.getElementById("end-btn");
+  const timerSpan  = document.getElementById("timer");
+
   const coachCtr   = document.getElementById("coach-container");
   const coachTab   = document.getElementById("coach-tab");
   const coachBadge = document.getElementById("coach-badge");
@@ -20,7 +25,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // -------------------------------------------------------------
   // state
   // -------------------------------------------------------------
-  let clickSent = false;   // set to true after “clicked” POST; reset each turn
+  let clickSent   = true;      // starts true (nothing to click yet)
+  let countdownId = null;      // setInterval handle
+  let sessionEnd  = 0;         // timestamp when session should end
 
   // -------------------------------------------------------------
   // helpers
@@ -36,31 +43,97 @@ document.addEventListener("DOMContentLoaded", () => {
     return chatBox.lastElementChild;
   };
 
-  // coach helpers ------------------------------------------------
+  // coach helpers -----------------------------------------------
   const resetCoachUI = () => {
     coachPanel.style.display = "none";
     coachCtr.classList.add("d-none");
     coachBadge.textContent = "";
-    clickSent = true;   // nothing to send until we show new advice
+    clickSent = true;
   };
 
   const showCoachAdvice = (advice) => {
-    if (!advice) return;                      // nothing to show
-
+    if (!advice) return;
     coachPanel.innerHTML = advice.replace(/\n/g, "<br>");
     coachCtr.classList.remove("d-none");
-    coachBadge.textContent = "1";             // unread marker
-    clickSent = false;                        // ready to send “clicked”
+    coachBadge.textContent = "1";
+    clickSent = false;
   };
 
-  // click toggles panel, clears unread, and logs “clicked”
+  // -------------------------------------------------------------
+  // session timer
+  // -------------------------------------------------------------
+  const tick = () => {
+    const remaining = Math.max(0, Math.floor((sessionEnd - Date.now()) / 1000));
+    const m = String(Math.floor(remaining / 60)).padStart(2, "0");
+    const s = String(remaining % 60).padStart(2, "0");
+    timerSpan.textContent = `${m}:${s}`;
+    if (remaining === 0) finishSession();
+  };
+
+  const startCountdown = (durationSeconds) => {
+    sessionEnd = Date.now() + durationSeconds * 1000;
+    tick();
+    countdownId = setInterval(tick, 1000);
+  };
+
+  const stopCountdown = () => {
+    clearInterval(countdownId);
+    timerSpan.textContent = "";
+  };
+
+  // -------------------------------------------------------------
+  // UI enable / disable helpers
+  // -------------------------------------------------------------
+  const enableChat = (enabled) => {
+    textarea.disabled = sendBtn.disabled = !enabled;
+  };
+
+  const finishSession = async () => {
+    stopCountdown();
+    enableChat(false);
+    startBtn.classList.remove("d-none");
+    endBtn.classList.add("d-none");
+    resetCoachUI();
+    await fetch("/chat/end/", {
+      method: "POST",
+      headers: { "X-CSRFToken": csrfToken },
+      credentials: "same-origin",
+    }).catch(console.error);
+    addBubble("System", "<em>Session ended.</em>", "text-danger");
+  };
+
+  // -------------------------------------------------------------
+  // start / end button handlers
+  // -------------------------------------------------------------
+  startBtn.addEventListener("click", async () => {
+    try {
+      const resp = await fetch("/chat/start/", {
+        method: "POST",
+        headers: { "X-CSRFToken": csrfToken },
+        credentials: "same-origin",
+      });
+      if (!resp.ok) throw new Error(resp.status);
+      const { duration } = await resp.json();
+      enableChat(true);
+      startBtn.classList.add("d-none");
+      endBtn.classList.remove("d-none");
+      startCountdown(duration);
+    } catch (err) {
+      alert("Could not start session.");
+      console.error(err);
+    }
+  });
+
+  endBtn.addEventListener("click", finishSession);
+
+  // -------------------------------------------------------------
+  // coach tab click → mark as read
+  // -------------------------------------------------------------
   coachTab.addEventListener("click", () => {
     const open = coachPanel.style.display === "block";
     coachPanel.style.display = open ? "none" : "block";
-
-    if (!open) {                    // user just opened it
-      coachBadge.textContent = "";  // mark as read
-
+    if (!open) {
+      coachBadge.textContent = "";
       if (!clickSent) {
         fetch("/chat/coach/clicked/", {
           method: "POST",
@@ -77,30 +150,25 @@ document.addEventListener("DOMContentLoaded", () => {
   // -------------------------------------------------------------
   chatForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (textarea.disabled) return;     // should never happen
 
-    // 🔄 clear any previous (read *or* unread) advice
     resetCoachUI();
 
-    const textarea = document.getElementById("query");
     const userText = textarea.value.trim();
     if (!userText) return;
-
-    addBubble("You", userText);
     textarea.value = "";
 
-    // --- customer typing placeholder ---------------------------
+    addBubble("You", userText);
+
     const typingElem = addBubble(
       "Customer",
-      '<em class="typing-indicator typing-dots">is typing…</em>',
-      ""                      // no Bootstrap muted-grey class
-      );
-
+      '<em class="typing-indicator typing-dots">is typing…</em>'
+    );
 
     const formData = new FormData();
     formData.append("query", userText);
     formData.append("csrfmiddlewaretoken", csrfToken);
 
-    // ---------------- customer AI call -------------------------
     try {
       const resp = await fetch("/chat/stream/", {
         method: "POST",
@@ -108,32 +176,30 @@ document.addEventListener("DOMContentLoaded", () => {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
       });
-
-      if (!resp.ok) throw new Error(`status ${resp.status}`);
+      if (resp.status === 403) { finishSession(); return; }
+      if (!resp.ok) throw new Error(resp.status);
 
       const { answer } = await resp.json();
-      typingElem.classList.remove("text-muted", "fst-italic");
       typingElem.innerHTML = `<strong>Customer:</strong> ${answer || "[empty]"}`;
     } catch (err) {
-      typingElem.innerHTML =
-        `<span class="text-danger">[error: ${err.message}]</span>`;
+      typingElem.innerHTML = `<span class="text-danger">[error]</span>`;
       console.error(err);
     }
 
-    // ---------------- coach advice fetch -----------------------
+    // --- coach advice ------------------------------------------
     try {
-      await new Promise((r) => setTimeout(r, 400));   // let server finish
+      await new Promise((r) => setTimeout(r, 400));
       const coachResp = await fetch("/chat/coach/", {
         method: "POST",
         headers: { "X-CSRFToken": csrfToken, Accept: "application/json" },
         credentials: "same-origin",
       });
+      if (coachResp.status === 403) { finishSession(); return; }
 
       const { advice } = await coachResp.json();
-      showCoachAdvice(advice);        // only shows if non-empty
+      showCoachAdvice(advice);
     } catch (err) {
       console.error("coach error:", err);
-      // silent fail → no popup
     }
   });
 });
