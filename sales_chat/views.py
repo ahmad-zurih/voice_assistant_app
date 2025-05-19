@@ -19,7 +19,7 @@ from .utils_prompt import get_prompt
 # constants & helpers
 # -------------------------------------------------------------------
 CSV_HEADER = "timestamp,sales person,AI customer,AI assistant coach,clicked\n"
-SESSION_DURATION = 20 * 60           # 20 minutes  → 1 200 seconds
+SESSION_DURATION = 5 * 60           # 20 minutes  → 1 200 seconds
 
 
 def _now():
@@ -46,7 +46,17 @@ def _buffer_row(request, *, sales="", customer="", coach="", clicked=""):
     request.session.modified = True
 
 
-# views.py
+def _write_row(request, *, sales="", customer="", coach="", clicked=""):
+    path = request.session.get("chat_log_path")
+    if not path:
+        return
+    try:
+        with open(Path(path), "a", newline="", encoding="utf-8") as fp:
+            csv.writer(fp).writerow([_now(), sales, customer, coach, clicked])
+    except Exception as err:
+        print("CSV write error:", err)
+
+
 # -------------------------------------------------------------------
 # write-through CSV helper
 # -------------------------------------------------------------------
@@ -205,7 +215,7 @@ def chat_stream(request):
     _ensure_conversation(request)
     log_path = request.session["chat_log_path"]
 
-    _log_row(request, sales=user_text)
+    _write_row(request, sales=user_text)
 
     # ---- build chat history
     history = request.session.get("sales_chat_history", [])
@@ -234,7 +244,7 @@ def chat_stream(request):
     request.session["sales_chat_history"] = history
     request.session.save()
 
-    _log_row(request, customer=full)
+    _write_row(request, customer=full)
 
     return JsonResponse({"answer": full}, json_dumps_params={"ensure_ascii": False})
 
@@ -282,7 +292,7 @@ def coach_advice(request):
     advice_visible = ""
     if advice_text and not advice_text.upper().startswith("NO_ADVICE"):
         advice_visible = advice_text
-        _log_row(
+        _buffer_row(
             request,
             coach=advice_text,
             clicked="false",
