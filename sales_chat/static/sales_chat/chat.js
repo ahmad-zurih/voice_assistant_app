@@ -1,36 +1,42 @@
 /* sales_chat/static/sales_chat/chat.js
-   — sessions, 20-min timer, typing indicator, coach tab, clicked logging
+   — sessions, 20‑min timer, typing indicator, coach tab, clicked logging
+   — REWRITTEN to enforce a single (non‑restartable) session
 */
 
 document.addEventListener("DOMContentLoaded", () => {
   // -------------------------------------------------------------
   // DOM shortcuts
   // -------------------------------------------------------------
-  const chatForm   = document.getElementById("chat-form");
-  const textarea   = document.getElementById("query");
-  const sendBtn    = chatForm.querySelector("button");
-  const chatBox    = document.getElementById("chat-box");
+  const chatForm  = document.getElementById("chat-form");
+  const textarea  = document.getElementById("query");
+  const sendBtn   = chatForm.querySelector("button");
+  const chatBox   = document.getElementById("chat-box");
 
-  const startBtn   = document.getElementById("start-btn");
-  const endBtn     = document.getElementById("end-btn");
-  const timerSpan  = document.getElementById("timer");
+  const startBtn  = document.getElementById("start-btn");
+  const endBtn    = document.getElementById("end-btn");
+  const timerSpan = document.getElementById("timer");
 
   const coachCtr   = document.getElementById("coach-container");
   const coachTab   = document.getElementById("coach-tab");
   const coachBadge = document.getElementById("coach-badge");
   const coachPanel = document.getElementById("coach-panel");
 
-  const csrfToken  = document.querySelector('[name="csrfmiddlewaretoken"]').value;
+  const csrfToken = document.querySelector('[name="csrfmiddlewaretoken"]').value;
 
   // -------------------------------------------------------------
-  // state
+  // persistent state helpers
   // -------------------------------------------------------------
-  let clickSent   = true;      // starts true (nothing to click yet)
-  let countdownId = null;      // setInterval handle
-  let sessionEnd  = 0;         // timestamp when session should end
+  const sessionFinished = startBtn?.dataset?.finished === "true"; // set by template
 
   // -------------------------------------------------------------
-  // helpers
+  // runtime state
+  // -------------------------------------------------------------
+  let clickSent   = true;   // starts true (nothing to click yet)
+  let countdownId = null;   // setInterval handle
+  let sessionEnd  = 0;      // timestamp when session should end
+
+  // -------------------------------------------------------------
+  // helper functions
   // -------------------------------------------------------------
   const scrollToBottom = (el) => { el.scrollTop = el.scrollHeight; };
 
@@ -43,7 +49,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return chatBox.lastElementChild;
   };
 
-  // coach helpers -----------------------------------------------
+  // coach helpers ------------------------------------------------
   const resetCoachUI = () => {
     coachPanel.style.display = "none";
     coachCtr.classList.add("d-none");
@@ -88,30 +94,59 @@ document.addEventListener("DOMContentLoaded", () => {
     textarea.disabled = sendBtn.disabled = !enabled;
   };
 
+  const permanentlyHideStart = () => {
+    startBtn.disabled = true;
+    startBtn.classList.add("d-none");
+  };
+
   const finishSession = async () => {
     stopCountdown();
     enableChat(false);
-    startBtn.classList.remove("d-none");
+    permanentlyHideStart(); // never show again
     endBtn.classList.add("d-none");
     resetCoachUI();
-    await fetch("/chat/end/", {
-      method: "POST",
-      headers: { "X-CSRFToken": csrfToken },
-      credentials: "same-origin",
-    }).catch(console.error);
+
+    try {
+      await fetch("/chat/end/", {
+        method: "POST",
+        headers: { "X-CSRFToken": csrfToken },
+        credentials: "same-origin",
+      });
+    } catch (err) {
+      console.error(err);
+    }
+
     addBubble("System", "<em>Session ended.</em>", "text-danger");
   };
 
   // -------------------------------------------------------------
+  // early exit if the session was already finished on page load
+  // -------------------------------------------------------------
+  if (sessionFinished) {
+    permanentlyHideStart();
+    enableChat(false);
+  }
+
+  // -------------------------------------------------------------
   // start / end button handlers
   // -------------------------------------------------------------
-  startBtn.addEventListener("click", async () => {
+  startBtn?.addEventListener("click", async () => {
+    if (startBtn.disabled) return; // just in case
+
     try {
       const resp = await fetch("/chat/start/", {
         method: "POST",
         headers: { "X-CSRFToken": csrfToken },
         credentials: "same-origin",
       });
+
+      if (resp.status === 403) {
+        // server says: already finished -> lock UI forever
+        alert("This exercise is complete – you can’t start it again.");
+        permanentlyHideStart();
+        return;
+      }
+
       if (!resp.ok) throw new Error(resp.status);
       const { duration } = await resp.json();
       enableChat(true);
@@ -150,7 +185,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // -------------------------------------------------------------
   chatForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (textarea.disabled) return;     // should never happen
+    if (textarea.disabled) return; // safety
 
     resetCoachUI();
 
@@ -176,6 +211,7 @@ document.addEventListener("DOMContentLoaded", () => {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
       });
+
       if (resp.status === 403) { finishSession(); return; }
       if (!resp.ok) throw new Error(resp.status);
 
@@ -188,7 +224,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- coach advice ------------------------------------------
     try {
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 400)); // small pause to not block UI
       const coachResp = await fetch("/chat/coach/", {
         method: "POST",
         headers: { "X-CSRFToken": csrfToken, Accept: "application/json" },

@@ -102,10 +102,16 @@ def _session_active(request) -> bool:
     if time.time() - started_at > get_session_duration():
         # auto-expire
         request.session["session_active"] = False
+        request.session["session_finished"] = True 
         request.session.save()
         return False
 
     return True
+
+
+def _session_finished(request) -> bool:
+    """True once the exercise has been completed (or timed-out)."""
+    return request.session.get("session_finished", False)
 
 
 # -------------------------------------------------------------------
@@ -150,6 +156,8 @@ def chat_room(request):
 @login_required
 def start_session(request):
     """Start a brand-new 20-min exercise and a brand-new CSV file."""
+    if _session_finished(request):
+        return JsonResponse({"error": "already-finished"}, status=403)
     # ------------------------------------------------------------
     # 1. wipe anything that ties us to the previous conversation
     # ------------------------------------------------------------
@@ -192,6 +200,7 @@ def end_session(request):
             csv.writer(fp).writerows(rows)
 
     request.session["session_active"] = False
+    request.session["session_finished"] = True 
     request.session.modified = True
     request.session.save()
     return JsonResponse({"status": "ended"})
