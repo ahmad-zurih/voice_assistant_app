@@ -12,14 +12,13 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .models import Conversation
-from .utils import get_openai_client
+from .utils import get_openai_client, get_session_duration
 from .utils_prompt import get_prompt
 
 # -------------------------------------------------------------------
 # constants & helpers
 # -------------------------------------------------------------------
 CSV_HEADER = "timestamp,sales person,AI customer,AI assistant coach,clicked\n"
-SESSION_DURATION = 5 * 60           # 20 minutes  → 1 200 seconds
 
 
 def _now():
@@ -100,7 +99,7 @@ def _session_active(request) -> bool:
     if not started_at:
         return False
 
-    if time.time() - started_at > SESSION_DURATION:
+    if time.time() - started_at > get_session_duration():
         # auto-expire
         request.session["session_active"] = False
         request.session.save()
@@ -174,8 +173,9 @@ def start_session(request):
     request.session["session_start"]  = int(time.time())
     request.session.save()
 
+    duration = get_session_duration()
     return JsonResponse(
-        {"status": "started", "duration": SESSION_DURATION}
+        {"status": "started", "duration": duration}
     )
 
 

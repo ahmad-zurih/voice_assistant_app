@@ -50,3 +50,22 @@ class Conversation(models.Model):
     def __str__(self) -> str:
         ts = self.started_at.strftime("%Y-%m-%d %H:%M")
         return f"{self.user.username} – {ts}"
+
+
+
+class ChatSetting(models.Model):
+    """
+    Global config for the sales-chat app.
+    Only one row is expected, but using a normal model keeps things simple.
+    """
+    session_duration = models.PositiveIntegerField(
+        default=20 * 60,                # 20 min in seconds
+        help_text="Length of one training session in **seconds**",
+    )
+
+    class Meta:
+        verbose_name = "Chat setting"
+        verbose_name_plural = "Chat settings"
+
+    def __str__(self) -> str:
+        return f"Session length: {self.session_duration}s"
