@@ -26,17 +26,6 @@ def _now():
     return timezone.localtime().strftime("%H:%M:%S")
 
 
-def _append_row(log_path: str, *, sales="", customer="", coach="", clicked=""):
-    """Append one row to the on-disk CSV file."""
-    if not log_path:
-        return
-    try:
-        with open(Path(log_path), "a", newline="", encoding="utf-8") as fp:
-            csv.writer(fp).writerow([_now(), sales, customer, coach, clicked])
-    except Exception as e:
-        print("CSV append error:", e)
-
-
 def _buffer_row(request, *, sales="", customer="", coach="", clicked=""):
     """Store one CSV row in the session until we flush at session end."""
     rows = request.session.get("csv_buffer", [])
@@ -57,41 +46,11 @@ def _write_row(request, *, sales="", customer="", coach="", clicked=""):
 
 
 # -------------------------------------------------------------------
-# write-through CSV helper
-# -------------------------------------------------------------------
-def _log_row(request, *, sales="", customer="", coach="", clicked=""):
-    """
-    • immediately append ONE row to the on-disk CSV  
-    • also keep a copy in the session so we can later update the
-      *clicked* column or flush anything that might still be pending
-    """
-    row = [_now(), sales, customer, coach, clicked]
-
-    # --- write to disk right away ----------------------------------
-    path = request.session.get("chat_log_path")
-    if path:
-        try:
-            with open(Path(path), "a", newline="", encoding="utf-8") as fp:
-                csv.writer(fp).writerow(row)
-        except Exception as err:
-            print("CSV write-through error:", err)
-
-    # --- mirror into the session buffer ----------------------------
-    buf = request.session.get("csv_buffer", [])
-    buf.append(row)
-    request.session["csv_buffer"] = buf
-    request.session.modified = True
-
-
-
-# -------------------------------------------------------------------
 # session status helpers
 # -------------------------------------------------------------------
+
 def _session_active(request) -> bool:
-    """
-    Returns True if the user has pressed “Start session” AND the
-    20-minute window is still running.
-    """
+    """True if user pressed “Start session” and timer not expired."""
     if not request.session.get("session_active"):
         return False
 
@@ -100,9 +59,8 @@ def _session_active(request) -> bool:
         return False
 
     if time.time() - started_at > get_session_duration():
-        # auto-expire
         request.session["session_active"] = False
-        request.session["session_finished"] = True 
+        request.session["session_finished"] = True
         request.session.save()
         return False
 
@@ -110,13 +68,13 @@ def _session_active(request) -> bool:
 
 
 def _session_finished(request) -> bool:
-    """True once the exercise has been completed (or timed-out)."""
     return request.session.get("session_finished", False)
 
 
 # -------------------------------------------------------------------
 # CSV / conversation initialisation
 # -------------------------------------------------------------------
+
 def _ensure_conversation(request):
     """Guarantee exactly one Conversation + CSV file per browser session."""
     conv_id = request.session.get("conversation_id")
@@ -143,6 +101,7 @@ def _ensure_conversation(request):
 # -------------------------------------------------------------------
 # UI page
 # -------------------------------------------------------------------
+
 @login_required
 def chat_room(request):
     return render(request, "sales_chat/chat.html")
@@ -151,65 +110,54 @@ def chat_room(request):
 # -------------------------------------------------------------------
 # start / end session endpoints
 # -------------------------------------------------------------------
+
 @csrf_exempt
 @require_POST
 @login_required
 def start_session(request):
-    """Start a brand-new 20-min exercise and a brand-new CSV file."""
     if _session_finished(request):
         return JsonResponse({"error": "already-finished"}, status=403)
-    # ------------------------------------------------------------
-    # 1. wipe anything that ties us to the previous conversation
-    # ------------------------------------------------------------
+
+    # wipe everything from previous run
     for key in (
-        "conversation_id",      # ← makes _ensure_conversation create a new Conversation
-        "chat_log_path",        # path to the previous CSV
-        "csv_buffer",           # rows still in memory
-        "sales_chat_history",   # old chat transcript
+        "conversation_id",
+        "chat_log_path",
+        "csv_buffer",
+        "sales_chat_history",
     ):
         request.session.pop(key, None)
 
-    # ------------------------------------------------------------
-    # 2. create new Conversation + CSV
-    # ------------------------------------------------------------
-    _ensure_conversation(request)            # ⇒ new file, new filename
+    _ensure_conversation(request)
 
-    # ------------------------------------------------------------
-    # 3. mark the session “active” and start the timer
-    # ------------------------------------------------------------
     request.session["session_active"] = True
-    request.session["session_start"]  = int(time.time())
+    request.session["session_start"] = int(time.time())
     request.session.save()
 
-    duration = get_session_duration()
-    return JsonResponse(
-        {"status": "started", "duration": duration}
-    )
+    return JsonResponse({"status": "started", "duration": get_session_duration()})
 
 
 @csrf_exempt
 @require_POST
 @login_required
 def end_session(request):
-    """Flush anything still buffered, then close the session."""
-    rows   = request.session.pop("csv_buffer", [])
-    path   = request.session.get("chat_log_path")
+    rows = request.session.pop("csv_buffer", [])
+    path = request.session.get("chat_log_path")
 
-    if rows and path:                       # unlikely, but be safe
+    if rows and path:
         with open(Path(path), "a", newline="", encoding="utf-8") as fp:
             csv.writer(fp).writerows(rows)
 
     request.session["session_active"] = False
-    request.session["session_finished"] = True 
+    request.session["session_finished"] = True
     request.session.modified = True
     request.session.save()
     return JsonResponse({"status": "ended"})
 
 
+# -------------------------------------------------------------------
+# customer endpoint – sales person ↔︎ AI customer
+# -------------------------------------------------------------------
 
-# -------------------------------------------------------------------
-# customer endpoint
-# -------------------------------------------------------------------
 @csrf_exempt
 @require_POST
 @login_required
@@ -222,11 +170,10 @@ def chat_stream(request):
         return JsonResponse({"error": "empty"}, status=400)
 
     _ensure_conversation(request)
-    log_path = request.session["chat_log_path"]
 
     _write_row(request, sales=user_text)
 
-    # ---- build chat history
+    # build chat history (system prompt only once)
     history = request.session.get("sales_chat_history", [])
     if not history:
         system_prompt = get_prompt("CUSTOMER_PROMPT", DEFAULT_CUSTOMER_PROMPT)
@@ -234,7 +181,6 @@ def chat_stream(request):
 
     history.append({"role": "user", "content": user_text})
 
-    # ---- OpenAI call
     client = get_openai_client()
     response = client.chat.completions.create(
         model="gpt-4.1",
@@ -242,25 +188,23 @@ def chat_stream(request):
         temperature=0.7,
         stream=False,
     )
-    full = response.choices[0].message.content
+    full_reply = response.choices[0].message.content
 
-    # ---- “human” delay
-    delay = min(max(len(full.split()) * 0.2, 0.5), 8.0)
-    time.sleep(delay)
+    time.sleep(min(max(len(full_reply.split()) * 0.2, 0.5), 8.0))
 
-    # ---- update state & CSV
-    history.append({"role": "assistant", "content": full})
+    history.append({"role": "assistant", "content": full_reply})
     request.session["sales_chat_history"] = history
     request.session.save()
 
-    _write_row(request, customer=full)
+    _write_row(request, customer=full_reply)
 
-    return JsonResponse({"answer": full}, json_dumps_params={"ensure_ascii": False})
+    return JsonResponse({"answer": full_reply}, json_dumps_params={"ensure_ascii": False})
 
 
 # -------------------------------------------------------------------
-# coach advice
+# coach advice (AI assistant coach) – now WITHOUT seeing the system prompt
 # -------------------------------------------------------------------
+
 @csrf_exempt
 @require_POST
 @login_required
@@ -268,12 +212,15 @@ def coach_advice(request):
     if not _session_active(request):
         return JsonResponse({"error": "inactive"}, status=403)
 
-    history: list[dict] = request.session.get("sales_chat_history", [])
+    full_history: list[dict] = request.session.get("sales_chat_history", [])
 
-    if len(history) < 3:
+    # Strip system‑level messages so the coach only sees the real dialogue
+    dialogue_only = [m for m in full_history if m["role"] != "system"]
+
+    if len(dialogue_only) < 2:
         return JsonResponse({"advice": "🕒 Say hello to the customer and I'll jump in!"})
 
-    trimmed_history = history[-12:]
+    trimmed_history = dialogue_only[-12:]
     coach_prompt = get_prompt("COACH_PROMPT", DEFAULT_COACH_PROMPT)
 
     try:
@@ -287,25 +234,21 @@ def coach_advice(request):
                 {
                     "role": "user",
                     "content": (
-                        "Conversation transcript:\n"
-                        f"{json.dumps(trimmed_history, ensure_ascii=False)}"
+                        "Conversation transcript:\n" +
+                        json.dumps(trimmed_history, ensure_ascii=False)
                     ),
                 },
             ],
         )
         advice_text = response.choices[0].message.content.strip()
     except Exception as err:
-        print("Coach-LLM error:", err)
+        print("Coach‑LLM error:", err)
         advice_text = "⚠️ Coach temporarily unavailable – please continue."
 
     advice_visible = ""
     if advice_text and not advice_text.upper().startswith("NO_ADVICE"):
         advice_visible = advice_text
-        _buffer_row(
-            request,
-            coach=advice_text,
-            clicked="false",
-        )
+        _buffer_row(request, coach=advice_text, clicked="false")
 
     return JsonResponse({"advice": advice_visible})
 
@@ -313,15 +256,11 @@ def coach_advice(request):
 # -------------------------------------------------------------------
 # mark advice as clicked
 # -------------------------------------------------------------------
+
 @csrf_exempt
 @require_POST
 @login_required
 def coach_clicked(request):
-    """
-    Called exactly once when the user opens the coach-advice tab.
-    We flip the *clicked* column from "false" to "true" — but now
-    we do it in the session-buffer, NOT on disk.
-    """
     if not _session_active(request):
         return JsonResponse({"error": "inactive"}, status=403)
 
@@ -329,23 +268,22 @@ def coach_clicked(request):
     if not rows:
         return JsonResponse({"status": "no-data"}, status=400)
 
-    # last row is always the most recent coach advice
-    rows[-1][4] = "true"            # column index 4 == clicked
+    rows[-1][4] = "true"  # clicked column
     request.session["csv_buffer"] = rows
-    request.session.modified = True   # make sure Django saves the session
+    request.session.modified = True
 
     return JsonResponse({"status": "ok"})
 
 
+# -------------------------------------------------------------------
+# default prompts
+# -------------------------------------------------------------------
 
-# -------------------------------------------------------------------
-# default prompts (kept at bottom for readability)
-# -------------------------------------------------------------------
 DEFAULT_CUSTOMER_PROMPT = """
 You are playing the role of a potential customer.
 - Act like a real person evaluating a product or service the salesperson proposes.
 - Ask questions, raise objections, or show interest naturally.
-- Keep replies around 1-3 short paragraphs so the chat flows quickly.
+- Keep replies around 1‑3 short paragraphs so the chat flows quickly.
 """
 
 DEFAULT_COACH_PROMPT = """
