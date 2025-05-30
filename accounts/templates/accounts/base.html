@@ -60,14 +60,19 @@
     <div class="collapse navbar-collapse" id="navbarSupportedContent">
       <ul class="navbar-nav ms-auto">
         {% if user.is_authenticated %}
+            {% if user.is_superuser %}
             <li class="nav-item">
               <a class="nav-link" href="{% url 'home' %}">Home</a>
             </li>
+            {% endif %}
              <li class="nav-item">
               <a class="nav-link" href="{% url 'sales_chat:chat_room' %}">Chat</a>
             </li>
+            {% if user.is_superuser %}
             <li class="nav-item">
               <a class="nav-link" href="{% url 'profile' %}">Profile</a>
+            </li>
+            {% endif %}
             <li class="nav-item">
               <a class="nav-link" href="{% url 'logout' %}">Logout</a>
             </li>

@@ -13,7 +13,7 @@ def home(request):
 
 def login_view(request):
     if request.user.is_authenticated:
-        return redirect('home')
+        return redirect('/chat/')
     
     if request.method == 'POST':
         form = AuthenticationForm(request, data=request.POST)
@@ -24,7 +24,7 @@ def login_view(request):
             if user is not None:
                 login(request, user)
                 messages.success(request, f'Welcome back, {username}!')
-                return redirect('home')
+                return redirect('/chat/')
             else:
                 messages.error(request, 'Invalid username or password.')
         else:

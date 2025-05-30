@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 import os
 import environ
+from django.urls import reverse_lazy  
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -141,7 +142,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # Redirect to home after login
-LOGIN_REDIRECT_URL = 'home'
+LOGIN_REDIRECT_URL = '/chat/'
 LOGOUT_REDIRECT_URL = 'login'
 
 # Where to send user if they need to log in
