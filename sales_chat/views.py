@@ -183,7 +183,7 @@ def chat_stream(request):
 
     client = get_openai_client()
     response = client.chat.completions.create(
-        model="gpt-4.1",
+        model="gpt-4o",
         messages=history,
         temperature=0.7,
         stream=False,
@@ -226,7 +226,7 @@ def coach_advice(request):
     try:
         client = get_openai_client()
         response = client.chat.completions.create(
-            model="gpt-4.1",
+            model="gpt-4o",
             temperature=0.35,
             max_tokens=180,
             messages=[
