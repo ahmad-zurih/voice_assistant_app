@@ -31,9 +31,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // -------------------------------------------------------------
   // runtime state
   // -------------------------------------------------------------
-  let clickSent   = true;   // starts true (nothing to click yet)
-  let countdownId = null;   // setInterval handle
-  let sessionEnd  = 0;      // timestamp when session should end
+  let clickSent   = true;
+  let countdownId = null;
+  let sessionEnd  = 0;
 
   // -------------------------------------------------------------
   // helper functions
@@ -102,7 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const finishSession = async () => {
     stopCountdown();
     enableChat(false);
-    permanentlyHideStart(); // never show again
+    permanentlyHideStart();
     endBtn.classList.add("d-none");
     resetCoachUI();
 
@@ -131,7 +131,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // start / end button handlers
   // -------------------------------------------------------------
   startBtn?.addEventListener("click", async () => {
-    if (startBtn.disabled) return; // just in case
+    if (startBtn.disabled) return;
 
     try {
       const resp = await fetch("/chat/start/", {
@@ -141,7 +141,6 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       if (resp.status === 403) {
-        // server says: already finished -> lock UI forever
         alert("This exercise is complete – you can’t start it again.");
         permanentlyHideStart();
         return;
@@ -185,12 +184,16 @@ document.addEventListener("DOMContentLoaded", () => {
   // -------------------------------------------------------------
   chatForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (textarea.disabled) return; // safety
+    if (textarea.disabled) return;
 
+    enableChat(false);  // Disable input during request
     resetCoachUI();
 
     const userText = textarea.value.trim();
-    if (!userText) return;
+    if (!userText) {
+      enableChat(true);
+      return;
+    }
     textarea.value = "";
 
     addBubble("You", userText);
@@ -222,9 +225,11 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error(err);
     }
 
+    enableChat(true); // Re-enable input after response is rendered
+
     // --- coach advice ------------------------------------------
     try {
-      await new Promise((r) => setTimeout(r, 400)); // small pause to not block UI
+      await new Promise((r) => setTimeout(r, 400));
       const coachResp = await fetch("/chat/coach/", {
         method: "POST",
         headers: { "X-CSRFToken": csrfToken, Accept: "application/json" },
