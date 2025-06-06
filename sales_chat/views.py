@@ -67,24 +67,30 @@ def _session_active(request) -> bool:
     return True
 
 
-def _session_finished(request) -> bool:
-    return request.session.get("session_finished", False)
-
-
 # -------------------------------------------------------------------
 # CSV / conversation initialisation
 # -------------------------------------------------------------------
 
 def _ensure_conversation(request):
-    """Guarantee exactly one Conversation + CSV file per browser session."""
-    conv_id = request.session.get("conversation_id")
+    """Guarantee exactly ONE Conversation + CSV file per Django user."""
 
+    # 1) cached in this browser session? -------------------------
+    conv_id = request.session.get("conversation_id")
     if conv_id:
         try:
             return Conversation.objects.get(id=conv_id)
         except Conversation.DoesNotExist:
-            pass  # stale ID → create fresh conversation
+            pass  # stale ID → continue
 
+    # 2) reuse existing Conversation row for this user -----------
+    existing = getattr(request.user, "sales_conversation", None)
+    if existing:
+        request.session["conversation_id"] = existing.id
+        request.session["chat_log_path"] = existing.log_file.path
+        request.session.save()
+        return existing
+
+    # 3) first‑ever run for this user → create the CSV ----------
     now = timezone.localtime()
     filename = f"{request.user.username}_{now:%Y-%m-%d_%H-%M-%S}.csv"
 
@@ -101,24 +107,24 @@ def _ensure_conversation(request):
 # -------------------------------------------------------------------
 # UI page
 # -------------------------------------------------------------------
-
 @login_required
 def chat_room(request):
-    return render(request, "sales_chat/chat.html")
+    finished = Conversation.objects.filter(user=request.user).exists()
+    return render(request, "sales_chat/chat.html", {"session_finished": finished})
 
 
 # -------------------------------------------------------------------
 # start / end session endpoints
 # -------------------------------------------------------------------
-
 @csrf_exempt
 @require_POST
 @login_required
 def start_session(request):
-    if _session_finished(request):
+    # Hard rule: 1 session (CSV) per user, lifetime
+    if Conversation.objects.filter(user=request.user).exists():
         return JsonResponse({"error": "already-finished"}, status=403)
 
-    # wipe everything from previous run
+    # wipe everything from a previous attempt in this browser session
     for key in (
         "conversation_id",
         "chat_log_path",
@@ -157,6 +163,7 @@ def end_session(request):
 # -------------------------------------------------------------------
 # customer endpoint – sales person ↔︎ AI customer
 # -------------------------------------------------------------------
+
 
 @csrf_exempt
 @require_POST
@@ -202,7 +209,7 @@ def chat_stream(request):
 
 
 # -------------------------------------------------------------------
-# coach advice (AI assistant coach) – now WITHOUT seeing the system prompt
+# coach advice – NO system prompt leakage
 # -------------------------------------------------------------------
 
 @csrf_exempt

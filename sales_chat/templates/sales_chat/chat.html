@@ -9,7 +9,7 @@
 
       <!-- session controls -->
       <div class="mb-3">
-          <button id="start-btn" class="btn btn-success">Start session</button>
+          <button id="start-btn" class="btn btn-success" {% if session_finished %}data-finished="true"{% endif %}>Start session</button>
           <button id="end-btn"   class="btn btn-danger d-none">End session</button>
           <span id="timer" class="ms-3 fw-bold h5"></span>
       </div>
