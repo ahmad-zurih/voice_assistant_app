@@ -28,27 +28,29 @@ class ConversationAdmin(admin.ModelAdmin):
 class PromptAdmin(admin.ModelAdmin):
     list_display  = ("key", "short_content")
     search_fields = ("key", "content")
-    readonly_fields = ("key",)
 
-    # Only allow editing, no adding or deleting
+    def get_readonly_fields(self, request, obj=None):
+        # Only make 'key' read-only if editing, not when adding
+        if obj:  # Editing existing prompt
+            return ("key",)
+        return ()
+
     def has_add_permission(self, request):
-        # Prevent adding new prompts if there are already 2
+        # Only allow adding prompts if there are less than 2
         return Prompt.objects.count() < 2
 
     def has_delete_permission(self, request, obj=None):
-        # Prevent deleting prompts entirely
         return False
 
     def get_actions(self, request):
-        # Remove the delete_selected action from the list view
         actions = super().get_actions(request)
         if 'delete_selected' in actions:
             del actions['delete_selected']
         return actions
 
-    # neat one-liner to keep the list view tidy
     def short_content(self, obj):
         return (obj.content[:60] + "…") if len(obj.content) > 60 else obj.content
+
 
 
 
