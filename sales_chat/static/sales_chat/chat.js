@@ -1,6 +1,7 @@
 /* sales_chat/static/sales_chat/chat.js
    — sessions, 20‑min timer, typing indicator, coach tab, clicked logging
    — REWRITTEN to enforce a single (non‑restartable) session
+   — MODIFIED to block copy/paste/cut in the textarea
 */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -24,9 +25,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const csrfToken = document.querySelector('[name="csrfmiddlewaretoken"]').value;
 
   // -------------------------------------------------------------
+  // Prevent copy/paste/cut/contextmenu in textarea
+  // -------------------------------------------------------------
+  ["copy", "paste", "cut"].forEach((evt) =>
+    textarea.addEventListener(evt, (e) => e.preventDefault())
+  );
+  textarea.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // -------------------------------------------------------------
   // persistent state helpers
   // -------------------------------------------------------------
-  const sessionFinished = startBtn?.dataset?.finished === "true"; // set by template
+  const sessionFinished = startBtn?.dataset?.finished === "true";
 
   // -------------------------------------------------------------
   // runtime state
@@ -186,7 +195,7 @@ document.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     if (textarea.disabled) return;
 
-    enableChat(false);  // Disable input during request
+    enableChat(false);
     resetCoachUI();
 
     const userText = textarea.value.trim();
@@ -225,7 +234,7 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error(err);
     }
 
-    enableChat(true); // Re-enable input after response is rendered
+    enableChat(true);
 
     // --- coach advice ------------------------------------------
     try {
