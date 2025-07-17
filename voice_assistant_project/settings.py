@@ -157,3 +157,11 @@ MEDIA_URL  = "/media/"
 
 #make sure nothing is stored once browser is closed
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
+
+# create hashed static files
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
+    },
+}
