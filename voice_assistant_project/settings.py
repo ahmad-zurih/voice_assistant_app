@@ -160,8 +160,11 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 
 # create hashed static files
-STORAGES = {
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
-    },
-}
+#STORAGES = {
+#    "default": {
+#        "BACKEND": "django.core.files.storage.FileSystemStorage",
+#    },
+#    "staticfiles": {
+#        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
+#    },
+#}
